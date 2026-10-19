@@ -1,0 +1,3 @@
+# Bridge LinkSoul <-> LLM local
+httpx>=0.27,<1.0          # cliente HTTP con streaming SSE y pool keep-alive
+websocket-client>=1.7.0   # dependencia del SDK oficial linksoul_agentsdk

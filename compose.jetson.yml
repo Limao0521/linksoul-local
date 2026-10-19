@@ -1,0 +1,31 @@
+# Override para el robot AgiBot X2 Ultra — NVIDIA Jetson Orin NX 16GB a bordo
+# (Ubuntu 22.04 / L4T r36.x, Docker con nvidia-container-runtime)
+#
+# Uso:
+#   docker compose -f docker-compose.yml -f compose.jetson.yml up -d --build
+#
+# Recomendado antes de arrancar (en el host del Jetson, fija clocks máximos,
+# +15-25% de velocidad de inferencia):
+#   sudo nvpmodel -m 0 && sudo jetson_clocks
+#
+# Si tu L4T es otra (comprobar con `cat /etc/nv_tegra_release`), cambia el tag
+# de BASE_IMAGE al correspondiente de dustynv/llama_cpp (r35.4.1, r36.2.0, r36.4.0...)
+
+services:
+  llm-server:
+    build:
+      args:
+        BASE_IMAGE: ${LLM_BASE_IMAGE:-dustynv/llama_cpp:r36.4.0}
+    runtime: nvidia
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+      # Todo el modelo en la GPU Ampere (crítico: 2-4x vs CPU)
+      NGL: 99
+      # Orin NX: 8x Cortex-A78AE; deja cores para ROS2/AimRT y el bridge
+      CPU_THREADS: 6
+      # Qwen3-4B Q4_K_M (~2.5GB) + KV cache q8_0 cabe holgado en 16GB unificados,
+      # dejando sitio a percepción/locomoción. Con 4B en Orin NX: ~35-40 tok/s.
+      CTX_SIZE: ${CTX_SIZE:-2048}
+    # Nota térmica: monitoriza con `tegrastats`; el throttle empieza a 99°C.
+    # Si el robot opera a >35°C ambiente, considera el perfil de servidor LAN.

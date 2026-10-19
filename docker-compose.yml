@@ -1,0 +1,107 @@
+# LinkSoul Local — servidor LLM on-device (API compatible OpenAI)
+#
+# Base por defecto: llama.cpp server CPU (funciona en cualquier x86/arm64, ideal
+# para probar en tu PC antes de desplegar en el robot).
+#
+# Perfiles de despliegue (override):
+#   Robot X2 Ultra (Jetson Orin NX 16GB):
+#     docker compose -f docker-compose.yml -f compose.jetson.yml up -d --build
+#   Servidor LAN / PC con GPU NVIDIA:
+#     docker compose -f docker-compose.yml -f compose.x86-cuda.yml up -d --build
+#   Solo CPU (este archivo, sin override):
+#     docker compose up -d --build
+
+name: linksoul-local
+
+services:
+  llm-server:
+    build:
+      context: ./llm-server
+      args:
+        BASE_IMAGE: ${LLM_BASE_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
+    image: linksoul-local/llm-server:latest
+    container_name: linksoul-llm
+    restart: unless-stopped
+    ports:
+      - "${LLM_PORT:-8080}:8080"
+    volumes:
+      - ./models:/models:ro
+    environment:
+      # Modelo (descárgalo antes con scripts/download-model.ps1|.sh)
+      MODEL_PATH: ${MODEL_PATH:-/models/Qwen3-4B-Q4_K_M.gguf}
+      # Contexto conversacional: 2048 es suficiente y ahorra ~750MB vs 4096
+      CTX_SIZE: ${CTX_SIZE:-2048}
+      # CPU: deja ~2 cores libres para el sistema/ROS2 a bordo del robot
+      CPU_THREADS: ${CPU_THREADS:-6}
+      # Capas en GPU: 0 = CPU (este perfil); los overrides GPU ponen 99
+      NGL: ${NGL:-0}
+      # 2 slots paralelos: tolera solapamiento de utterances sin bloquear
+      PARALLEL: ${PARALLEL:-2}
+      # Prefill rápido
+      BATCH_SIZE: ${BATCH_SIZE:-512}
+      UBATCH_SIZE: ${UBATCH_SIZE:-512}
+      # KV cache cuantizado (requiere flash attention; el entrypoint lo detecta)
+      KV_CACHE_TYPE: ${KV_CACHE_TYPE:-q8_0}
+      # Decodificación especulativa opcional (ej. /models/Qwen3-0.6B-Q4_K_M.gguf)
+      DRAFT_MODEL: ${DRAFT_MODEL:-}
+      EXTRA_ARGS: ${EXTRA_ARGS:-}
+    healthcheck:
+      # /health devuelve 200 cuando el modelo está cargado y listo
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 120s
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Bridge: agente LinkSoul (WebSocket Agent SDK) que enruta la conversación del
+  # robot al servidor LLM local en vez de a la nube de AgiBot.
+  # Requiere el wheel del SDK en bridge/vendor/ (ver bridge/vendor/README.md) y
+  # las credenciales AGIBOT_* en .env. Sin credenciales, usa el modo de prueba:
+  #   docker compose run --rm linksoul-bridge python -m bridge.chat_test
+  linksoul-bridge:
+    build:
+      context: ./bridge
+    image: linksoul-local/bridge:latest
+    container_name: linksoul-bridge
+    # on-failure acotado: sin wheel del SDK o sin credenciales el bridge sale con
+    # código 2; mejor que entre en bucle de reinicios eterno
+    restart: on-failure:5
+    depends_on:
+      llm-server:
+        condition: service_healthy
+    environment:
+      # ---- LLM local ----
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://llm-server:8080/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-not-needed}
+      LLM_MODEL: ${LLM_MODEL:-local}
+      MAX_TOKENS: ${MAX_TOKENS:-300}
+      TEMPERATURE: ${TEMPERATURE:-0.7}
+      # Qwen3 sin fase "thinking": ahorra segundos antes del primer token
+      ENABLE_THINKING: ${ENABLE_THINKING:-false}
+      HISTORY_TURNS: ${HISTORY_TURNS:-8}
+      PERSONA_FILE: /app/persona/persona.md
+      # ---- Credenciales LinkSoul (open.agibot.com -> Console -> Apps) ----
+      AGIBOT_APP_ID: ${AGIBOT_APP_ID:-}
+      AGIBOT_APP_KEY: ${AGIBOT_APP_KEY:-}
+      AGIBOT_APP_SECRET: ${AGIBOT_APP_SECRET:-}
+      AGIBOT_AGENT_CODE: ${AGIBOT_AGENT_CODE:-}
+      LINKSOUL_WS_URL: ${LINKSOUL_WS_URL:-wss://open.agibot.com/api/V1/open-portal/app/wss/agent-sdk}
+      # ASR_2_LLM: el robot hace ASR y TTS con su voz de LinkSoul; el bridge solo
+      # aporta el TEXTO del LLM local. (AUDIO_2_TTS/ASR_2_TTS exigirían generar
+      # también el audio TTS en el bridge — no implementado todavía.)
+      LINKSOUL_CALLBACK_TYPE: ${LINKSOUL_CALLBACK_TYPE:-ASR_2_LLM}
+    volumes:
+      # Personalidad editable sin recompilar la imagen
+      - ./bridge/persona:/app/persona:ro
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

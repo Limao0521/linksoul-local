@@ -1,0 +1,14 @@
+# Modelos (grandes; se descargan con scripts/download-model.*)
+models/*.gguf
+models/*.bin
+
+# Entorno local
+.env
+
+# Python (bridge)
+__pycache__/
+*.pyc
+.venv/
+
+# Docker
+*.log

@@ -1,0 +1,25 @@
+# Override para servidor LAN / PC con GPU NVIDIA (x86_64 + CUDA 12)
+# Escenario: el robot (X2 Ultra e incluso X2 base, que no tiene Jetson) delega
+# la inferencia a un equipo de la red local — sin coste térmico/de batería para
+# el robot y con modelos más grandes posibles (8B+ con una RTX 3090/4090).
+#
+# Uso:
+#   docker compose -f docker-compose.yml -f compose.x86-cuda.yml up -d --build
+
+services:
+  llm-server:
+    build:
+      args:
+        BASE_IMAGE: ${LLM_BASE_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda12}
+    environment:
+      NGL: 99
+      CPU_THREADS: ${CPU_THREADS:-8}
+      # En una GPU de escritorio puedes permitirte más contexto
+      CTX_SIZE: ${CTX_SIZE:-4096}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

@@ -1,0 +1,16 @@
+# Los scripts .sh se ejecutan en contenedores Linux: SIEMPRE LF en el repo y
+# al checkout, incluso desde Windows (CRLF rompería `#!/bin/sh` en Docker).
+*.sh text eol=lf
+*.ps1 text eol=crlf
+
+# Texto normal: normalizar a LF en el repo
+*.py text
+*.md text
+*.yml text
+*.yaml text
+Dockerfile text
+*.txt text
+*.json text
+
+# Binarios
+*.gguf binary
